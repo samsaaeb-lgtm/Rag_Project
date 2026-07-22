@@ -19,3 +19,5 @@ storage/app/medical_vector_db/
 *.key
 *.pem
 .env
+
+storage/app/medical_processed_chunks/

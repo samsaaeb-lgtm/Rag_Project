@@ -9,11 +9,16 @@ from langchain_community.vectorstores import Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from huggingface_hub import snapshot_download
 
 os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY", "")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 vector_db_dir = os.path.join(BASE_DIR, "storage", "app", "medical_vector_db")
+chunks_dir = os.path.join(BASE_DIR, "storage", "app", "medical_processed_chunks")
+
+# اسم الـ dataset على Hugging Face يلي فيه ملفات الـ JSON
+HF_DATASET_REPO = "dmdmk/medical-rag-chunks"
 
 app = FastAPI()
 
@@ -29,20 +34,22 @@ class QueryRequest(BaseModel):
 async def debug():
     total_count = 0
     collections_list = []
-    
+
     try:
         client = chromadb.PersistentClient(path=vector_db_dir)
         collections_list = [c.name for c in client.list_collections()]
-        
+
         if vector_store:
             total_count = vector_store._collection.count()
     except Exception as e:
         total_count = f"Error: {str(e)}"
-            
+
     return {
         "vector_db_path": vector_db_dir,
         "path_exists": os.path.exists(vector_db_dir),
         "files_in_path": os.listdir(vector_db_dir) if os.path.exists(vector_db_dir) else "غير موجود",
+        "chunks_dir_exists": os.path.exists(chunks_dir),
+        "files_in_chunks_dir": os.listdir(chunks_dir) if os.path.exists(chunks_dir) else "غير موجود",
         "existing_collections": collections_list,
         "total_vectors_in_db": total_count
     }
@@ -51,19 +58,31 @@ async def debug():
 async def startup_event():
     global vector_store, llm, embedding_model
     print("جاري تهيئة نظام RAG...")
-    
+
     embedding_model = HuggingFaceEmbeddings(
         model_name="BAAI/bge-small-en-v1.5",
         model_kwargs={'device': 'cpu'}
     )
-    
+
+    # تنزيل ملفات الـ JSON من Hugging Face إذا مش موجودة محلياً
+    if not os.path.exists(chunks_dir) or not os.listdir(chunks_dir):
+        print("ملفات البيانات غير موجودة محلياً، جاري تنزيلها من Hugging Face...")
+        try:
+            snapshot_download(
+                repo_id=HF_DATASET_REPO,
+                repo_type="dataset",
+                local_dir=chunks_dir
+            )
+            print("تم تنزيل البيانات من Hugging Face بنجاح!")
+        except Exception as e:
+            print(f"خطأ أثناء تنزيل البيانات من Hugging Face: {e}")
+
     # التحقق هل قاعدة البيانات موجودة على السيرفر أم لا
     if not os.path.exists(vector_db_dir) or not os.listdir(vector_db_dir):
         print("قاعدة البيانات غير موجودة، جاري بنائها تلقائياً من ملفات الـ JSON...")
-        
+
         all_docs = []
-        chunks_dir = os.path.join(BASE_DIR, "storage", "app", "medical_processed_chunks")
-        
+
         if os.path.exists(chunks_dir):
             for filename in os.listdir(chunks_dir):
                 if filename.endswith(".json"):
@@ -76,7 +95,7 @@ async def startup_event():
                                 metadata=item.get("metadata", {})
                             )
                             all_docs.append(doc)
-            
+
             if all_docs:
                 print(f"تم تحميل {len(all_docs)} قطعة نصية، جاري إنشاء قاعدة بيانات المتجهات...")
                 vector_store = Chroma.from_documents(
@@ -95,7 +114,7 @@ async def startup_event():
             persist_directory=vector_db_dir,
             embedding_function=embedding_model
         )
-        
+
     llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.2)
     print("النظام جاهز!")
 
@@ -104,9 +123,9 @@ async def startup_event():
 async def ask_question(request: QueryRequest):
     if not vector_store or not llm:
         raise HTTPException(status_code=500, detail="لم يتم تحميل قاعدة البيانات أو الموديل بعد")
-        
+
     retriever = vector_store.as_retriever(search_kwargs={"k": 5})
-    
+
     system_prompt = (
         "You are an expert academic medical professor specialized in anesthesia education.\n"
         "Your target audience is medical/nursing students who need clear, educational, and well-structured explanations.\n"
@@ -119,22 +138,22 @@ async def ask_question(request: QueryRequest):
         "5. If the context doesn't contain the answer, say exactly: 'This specific detail is not mentioned in your reference books.'\n\n"
         "Context:\n{context}"
     )
-    
+
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
         ("human", "{question}")
     ])
-    
+
     docs = retriever.invoke(request.question)
-    
+
     context_text = "\n\n---\n\n".join([
         f"[Source: {d.metadata.get('source', 'Unknown')}, Page: {d.metadata.get('page', 'N/A')}]\n{d.page_content}"
         for d in docs
     ])
-    
+
     chain = prompt | llm | StrOutputParser()
     answer = chain.invoke({"context": context_text, "question": request.question})
-    
+
     return {"answer": answer}
 
 # 3️⃣ مسار البحث المباشر للكلمات القصيرة (/search)
@@ -142,9 +161,9 @@ async def ask_question(request: QueryRequest):
 async def search_documents(request: QueryRequest):
     if not vector_store:
         raise HTTPException(status_code=500, detail="قاعدة البيانات غير محملة")
-        
+
     docs = vector_store.similarity_search(request.question, k=5)
-    
+
     results = [
         {
             "content": doc.page_content,
@@ -152,5 +171,6 @@ async def search_documents(request: QueryRequest):
         }
         for doc in docs
     ]
-    
+
     return {"results": results}
+

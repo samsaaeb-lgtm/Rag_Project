@@ -77,9 +77,31 @@ async def startup_event():
         except Exception as e:
             print(f"خطأ أثناء تنزيل البيانات من Hugging Face: {e}")
 
-    # التحقق هل قاعدة البيانات موجودة على السيرفر أم لا
-    if not os.path.exists(vector_db_dir) or not os.listdir(vector_db_dir):
-        print("قاعدة البيانات غير موجودة، جاري بنائها تلقائياً من ملفات الـ JSON...")
+    # تحقق مبدئي: هل القاعدة موجودة وفيها بيانات فعلياً؟
+    needs_rebuild = True
+    if os.path.exists(vector_db_dir) and os.listdir(vector_db_dir):
+        try:
+            test_store = Chroma(
+                persist_directory=vector_db_dir,
+                embedding_function=embedding_model
+            )
+            count = test_store._collection.count()
+            if count > 0:
+                print(f"قاعدة البيانات موجودة وفيها {count} عنصر، جاري تحميلها...")
+                vector_store = test_store
+                needs_rebuild = False
+            else:
+                print("تحذير: قاعدة البيانات موجودة لكنها فاضية! سيتم إعادة بنائها...")
+        except Exception as e:
+            print(f"خطأ أثناء تحميل قاعدة البيانات الموجودة: {e}، سيتم إعادة بنائها...")
+
+    if needs_rebuild:
+        print("جاري بناء قاعدة بيانات المتجهات من جديد...")
+
+        # احذفي أي بيانات فاضية أو تالفة أولاً
+        if os.path.exists(vector_db_dir):
+            import shutil
+            shutil.rmtree(vector_db_dir)
 
         all_docs = []
 
@@ -103,17 +125,11 @@ async def startup_event():
                     embedding=embedding_model,
                     persist_directory=vector_db_dir
                 )
-                print("تم بناء قاعدة البيانات وحفظها بنجاح!")
+                print("تم بناء القاعدة وحفظها بنجاح!")
             else:
                 print("تحذير: لم يتم العثور على بيانات داخل ملفات الـ JSON!")
         else:
             print("خطأ: مجلد الـ chunks غير موجود!")
-    else:
-        print("قاعدة البيانات موجودة مسبقاً، جاري تحميلها...")
-        vector_store = Chroma(
-            persist_directory=vector_db_dir,
-            embedding_function=embedding_model
-        )
 
     llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.2)
     print("النظام جاهز!")

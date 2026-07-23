@@ -2,6 +2,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import os
 import json
+import gc
+import shutil
 import chromadb
 from langchain_core.documents import Document
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -17,7 +19,6 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 vector_db_dir = os.path.join(BASE_DIR, "storage", "app", "medical_vector_db")
 chunks_dir = os.path.join(BASE_DIR, "storage", "app", "medical_processed_chunks")
 
-# اسم الـ dataset على Hugging Face يلي فيه ملفات الـ JSON
 HF_DATASET_REPO = "dmdmk/medical-rag-chunks"
 
 app = FastAPI()
@@ -29,7 +30,6 @@ embedding_model = None
 class QueryRequest(BaseModel):
     question: str
 
-# 1️⃣ مسار التشخيص والـ Debugging
 @app.get("/debug")
 async def debug():
     total_count = 0
@@ -64,7 +64,6 @@ async def startup_event():
         model_kwargs={'device': 'cpu'}
     )
 
-    # تنزيل ملفات الـ JSON من Hugging Face إذا مش موجودة محلياً
     if not os.path.exists(chunks_dir) or not os.listdir(chunks_dir):
         print("ملفات البيانات غير موجودة محلياً، جاري تنزيلها من Hugging Face...")
         try:
@@ -79,6 +78,7 @@ async def startup_event():
 
     # تحقق مبدئي: هل القاعدة موجودة وفيها بيانات فعلياً؟
     needs_rebuild = True
+    test_store = None
     if os.path.exists(vector_db_dir) and os.listdir(vector_db_dir):
         try:
             test_store = Chroma(
@@ -98,10 +98,16 @@ async def startup_event():
     if needs_rebuild:
         print("جاري بناء قاعدة بيانات المتجهات من جديد...")
 
-        # احذفي أي بيانات فاضية أو تالفة أولاً
+        # نحرر أي اتصال مفتوح على ملفات القاعدة القديمة قبل محاولة حذفها
+        if test_store is not None:
+            del test_store
+        gc.collect()
+
         if os.path.exists(vector_db_dir):
-            import shutil
-            shutil.rmtree(vector_db_dir)
+            try:
+                shutil.rmtree(vector_db_dir)
+            except PermissionError as e:
+                print(f"تحذير: تعذر حذف بعض الملفات القديمة ({e})، سيتم المتابعة والكتابة فوقها")
 
         all_docs = []
 
@@ -134,7 +140,6 @@ async def startup_event():
     llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.2)
     print("النظام جاهز!")
 
-# 2️⃣ مسار الشرح بالذكاء الاصطناعي للأسئلة الكاملة (/ask)
 @app.post("/ask")
 async def ask_question(request: QueryRequest):
     if not vector_store or not llm:
@@ -172,7 +177,6 @@ async def ask_question(request: QueryRequest):
 
     return {"answer": answer}
 
-# 3️⃣ مسار البحث المباشر للكلمات القصيرة (/search)
 @app.post("/search")
 async def search_documents(request: QueryRequest):
     if not vector_store:
@@ -189,4 +193,3 @@ async def search_documents(request: QueryRequest):
     ]
 
     return {"results": results}
-

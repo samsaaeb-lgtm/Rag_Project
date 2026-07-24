@@ -89,10 +89,10 @@ async def startup_event():
 
     # 4. تهيئة نموذج الـ LLM مع تمرير المفتاح صراحة
     llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash-latest", 
-        temperature=0.2,
-        google_api_key=GOOGLE_API_KEY
-    )
+    model="gemini-flash-latest",   # ✅ محدث ومتاح دايماً
+    temperature=0.2,
+    google_api_key=GOOGLE_API_KEY
+)
 
 @app.post("/ask")
 async def ask_question(request: QueryRequest):

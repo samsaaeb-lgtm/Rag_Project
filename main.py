@@ -9,12 +9,14 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from huggingface_hub import snapshot_download
 
-os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY", "")
+# التأكد من جلب مفتاح الـ API بشكل صحيح
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 vector_db_dir = os.path.join(BASE_DIR, "storage", "app", "medical_vector_db")
 
-# مستودع قاعدة البيانات الجاهزة الذي رفعناه للتو
+# مستودع قاعدة البيانات الجاهزة على Hugging Face
 HF_VECTOR_REPO = "dmdmdk/medical-vector-db"
 
 app = FastAPI()
@@ -85,8 +87,12 @@ async def startup_event():
     except Exception as e:
         print(f"❌ خطأ فادح أثناء تهيئة Chroma: {e}")
 
-    # 4. تهيئة نموذج الـ LLM
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.2)
+    # 4. تهيئة نموذج الـ LLM مع تمرير المفتاح صراحة
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-1.5-flash", 
+        temperature=0.2,
+        google_api_key=GOOGLE_API_KEY
+    )
     print("🚀 النظام جاهز تماماً لتلقي الاستفسارات!")
 
 @app.post("/ask")
@@ -116,8 +122,9 @@ async def ask_question(request: QueryRequest):
 
     docs = retriever.invoke(request.question)
 
+    # تم التصحيح هنا لاستخدام source_book و page_number بدلاً من source و page
     context_text = "\n\n---\n\n".join([
-        f"[Source: {d.metadata.get('source', 'Unknown')}, Page: {d.metadata.get('page', 'N/A')}]\n{d.page_content}"
+        f"[Source: {d.metadata.get('source_book', 'Unknown')}, Page: {d.metadata.get('page_number', 'N/A')}]\n{d.page_content}"
         for d in docs
     ])
 

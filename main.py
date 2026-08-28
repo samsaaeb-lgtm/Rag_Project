@@ -89,7 +89,7 @@ async def startup_event():
 
     # 4. تهيئة نموذج الـ LLM مع تمرير المفتاح صراحة
     llm = ChatGoogleGenerativeAI(
-    model="gemini-2.0-flash",   # ✅ محدث ومتاح دايماً
+    model="gemini-2.5-flash",
     temperature=0.2,
     google_api_key=GOOGLE_API_KEY
 )

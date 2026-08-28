@@ -129,21 +129,22 @@ async def ask_question(request: QueryRequest):
 
     chain = prompt | llm | StrOutputParser()
 
-try:
-    answer = chain.invoke({
-        "context": context_text,
-        "question": request.question
-    })
+    try:
+        answer = chain.invoke({
+            "context": context_text,
+            "question": request.question
+        })
+        return {"answer": answer}
 
-    return {"answer": answer}
+    except Exception as e:
+        print(f"❌ GEMINI ERROR: {type(e).__name__}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Gemini error: {str(e)}"
+        )
 
-except Exception as e:
-    print(f"❌ GEMINI ERROR: {type(e).__name__}: {str(e)}")
 
-    raise HTTPException(
-        status_code=500,
-        detail=f"Gemini error: {str(e)}"
-    )
+@app.post("/search")
 
 @app.post("/search")
 async def search_documents(request: QueryRequest):
